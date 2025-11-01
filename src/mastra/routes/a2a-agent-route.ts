@@ -47,14 +47,21 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
       }
       
       // Convert A2A messages to Mastra format
-      const mastraMessages = messagesList.map((msg) => ({
-        role: msg.role,
-        content: msg.parts?.map((part:any) => {
-          if (part.kind === 'text') return part.text;
-          if (part.kind === 'data') return JSON.stringify(part.data);
-          return '';
-        }).join('\n') || ''
-      }));
+       const mastraMessages = messagesList.map((msg: any) => {
+        const parts = msg.parts || [];
+        
+        // Extract text part (index 0) - Telex's interpretation of user intent
+        const textPart = parts.find((p: any) => p.kind === 'text')?.text || '';
+        
+        // Extract data part (conversation history) if needed
+        const dataPart = parts.find((p: any) => p.kind === 'data');
+        const historyContext = dataPart ? `\n\nContext: ${JSON.stringify(dataPart.data)}` : '';
+        
+        return {
+          role: msg.role,
+          content: textPart + historyContext
+        };
+      });
       
       // Execute agent
       const response = await agent.generate(mastraMessages);

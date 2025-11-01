@@ -18,5 +18,8 @@ export const mastra = new Mastra({
   },
   server: {
     apiRoutes: [a2aAgentRoute]
+  },
+  bundler: {
+    externals: ['axios','zod'],
   }
 });
