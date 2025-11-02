@@ -17,9 +17,13 @@ export const mastra = new Mastra({
     default: { enabled: true },
   },
   server: {
+     build: {
+      openAPIDocs: true,
+      swaggerUI: true,
+    },
     apiRoutes: [a2aAgentRoute]
   },
   bundler: {
     externals: ['axios','zod'],
-  }
+  },
 });
