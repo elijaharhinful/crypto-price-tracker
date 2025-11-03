@@ -13,13 +13,25 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
       const { jsonrpc, id: requestId, method, params } = body;
       
       // Validate JSON-RPC 2.0 format
-      if (jsonrpc !== '2.0' || !requestId) {
+      if (!jsonrpc || jsonrpc !== '2.0') {
         return c.json({
           jsonrpc: '2.0',
           id: requestId || null,
           error: {
             code: -32600,
-            message: 'Invalid Request: jsonrpc must be "2.0" and id is required'
+            message: 'Invalid Request: jsonrpc must be "2.0"'
+          }
+        }, 400);
+      }
+      
+      // ID can be null or any value, but must be present
+      if (requestId === undefined) {
+        return c.json({
+          jsonrpc: '2.0',
+          id: null,
+          error: {
+            code: -32600,
+            message: 'Invalid Request: id is required'
           }
         }, 400);
       }
@@ -36,9 +48,9 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
         }, 404);
       }
       
-      // Extract messages from params
+      // Extract messages from params (handle missing params gracefully)
       const { message, messages, contextId, taskId, metadata } = params || {};
-      let messagesList = [];
+      let messagesList: any[] = [];
       
       if (message) {
         messagesList = [message];
@@ -46,8 +58,17 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
         messagesList = messages;
       }
       
+      // If no messages provided, create a default greeting
+      if (messagesList.length === 0) {
+        messagesList = [{
+          role: 'user',
+          parts: [{ kind: 'text', text: 'Hello' }],
+          messageId: randomUUID()
+        }];
+      }
+      
       // Convert A2A messages to Mastra format
-       const mastraMessages = messagesList.map((msg: any) => {
+      const mastraMessages = messagesList.map((msg: any) => {
         const parts = msg.parts || [];
         
         // Extract text part (index 0) - Telex's interpretation of user intent
@@ -58,16 +79,31 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
         const historyContext = dataPart ? `\n\nContext: ${JSON.stringify(dataPart.data)}` : '';
         
         return {
-          role: msg.role,
-          content: textPart + historyContext
+          role: msg.role || 'user',
+          content: textPart || 'Hello' // Default content if empty
         };
       });
       
-      // Execute agent
-      const response = await agent.generate(mastraMessages);
-      const agentText = response.text || '';
+      // Execute agent with error handling
+      let response;
+      try {
+        response = await agent.generate(mastraMessages);
+      } catch (genError: any) {
+        console.error('Agent generation error:', genError);
+        return c.json({
+          jsonrpc: '2.0',
+          id: requestId,
+          error: {
+            code: -32603,
+            message: 'Agent execution failed',
+            data: { details: genError.message }
+          }
+        }, 500);
+      }
       
-      // Build artifacts array
+      const agentText = response.text || 'No response generated';
+      
+      // Build artifacts array - only include agent's formatted response
       const artifacts = [
         {
           artifactId: randomUUID(),
@@ -75,25 +111,13 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
           parts: [{ kind: 'text', text: agentText }]
         }
       ];
-      
-      // Add tool results as artifacts
-      if (response.toolResults && response.toolResults.length > 0) {
-        artifacts.push({
-          artifactId: randomUUID(),
-          name: 'ToolResults',
-          parts: [{ 
-            kind: 'text', 
-            text: JSON.stringify(response.toolResults) 
-          }]
-        });
-      }
-      
+            
       // Build conversation history
       const history = [
-        ...messagesList.map((msg) => ({
+        ...messagesList.map((msg: any) => ({
           kind: 'message',
-          role: msg.role,
-          parts: msg.parts,
+          role: msg.role || 'user',
+          parts: msg.parts || [{ kind: 'text', text: 'Hello' }],
           messageId: msg.messageId || randomUUID(),
           taskId: msg.taskId || taskId || randomUUID(),
         })),
@@ -129,6 +153,7 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
         }
       });
     } catch (error: any) {
+      console.error('Route handler error:', error);
       return c.json({
         jsonrpc: '2.0',
         id: null,
